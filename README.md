@@ -1,245 +1,154 @@
-# Amplifier PowerShell Tool Module
+# amplifier-module-tool-pwsh
 
-PowerShell command execution for Amplifier agents.
+PowerShell command execution for [Amplifier](https://github.com/microsoft/amplifier). The Windows-native equivalent of `tool-bash` — preferred over bash on Windows platforms.
 
-## Quick Start (Windows)
+## Installation
 
-Get up and running in under 5 minutes:
+### As an app bundle (recommended for Windows users)
 
-### 1. Install Prerequisites
+Installs the tool with Windows shell guidance, Unix-to-PowerShell equivalents context, and the full PowerShell skill:
 
-Open PowerShell as Administrator and run:
-
-```powershell
-# Install PowerShell Core (if not already installed)
-winget install Microsoft.PowerShell
-
-# Install UV (fast Python package manager)
-irm https://astral.sh/uv/install.ps1 | iex
-
-# Install Amplifier CLI
-uv tool install git+https://github.com/microsoft/amplifier-app-cli
+```bash
+amplifier bundle add git+https://github.com/colombod/amplifier-module-tool-pwsh@main --app
 ```
 
-Close and reopen PowerShell for PATH changes to take effect.
+### As a composable behavior (add to existing bundle)
 
-### 2. Configure Amplifier
+Layers PowerShell support onto any foundation-based bundle:
 
-```powershell
-# Set up your AI provider (choose one)
-amplifier provider install anthropic
-# OR
-amplifier provider install openai
+```bash
+amplifier bundle add git+https://github.com/colombod/amplifier-module-tool-pwsh@main#subdirectory=behaviors/windows-shell.yaml --app
 ```
 
-### 3. Add This Module
+### As a raw module (advanced)
 
-Create or edit your settings file at `~/.amplifier/settings.yaml`:
+Add to your bundle's `tools:` section:
 
 ```yaml
-modules:
-  sources:
-    tool-pwsh: git+https://github.com/Anokye-Labs/amplifier-module-tool-pwsh
-```
-
-Or use the CLI:
-
-```powershell
-amplifier module source set tool-pwsh git+https://github.com/Anokye-Labs/amplifier-module-tool-pwsh --scope global
-```
-
-### 4. Create a PowerShell-Enabled Bundle
-
-Create a file at `~/.amplifier/bundles/pwsh-dev.md`:
-
-```markdown
----
-bundle:
-  name: pwsh-dev
-  version: 1.0.0
-  includes:
-    - foundation:base
-  modules:
-    tools:
-      - tool-pwsh
----
-
-You have access to PowerShell for Windows system administration and scripting.
-Use the `pwsh` tool for all shell operations.
-```
-
-### 5. Try It Out!
-
-```powershell
-# Start Amplifier with your new bundle
-amplifier run --bundle pwsh-dev
-
-# Then ask it to do something with PowerShell:
-# "List all running services"
-# "Show me disk usage"
-# "Find large files in my Downloads folder"
+tools:
+  - module: tool-pwsh
+    source: git+https://github.com/colombod/amplifier-module-tool-pwsh@main
+    config:
+      safety_profile: standard
 ```
 
 ## Prerequisites
 
-- **Python 3.11+**
-- **[UV](https://github.com/astral-sh/uv)** - Fast Python package manager
-- **PowerShell Core (pwsh)** - Recommended for cross-platform use
-
-### Installing UV
-
-```bash
-# macOS/Linux/WSL
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Windows
-powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
-```
-
-### Installing PowerShell Core
-
-PowerShell Core (`pwsh`) is cross-platform and recommended over Windows PowerShell:
+- **PowerShell 7+** (`pwsh`) — [Install PowerShell](https://learn.microsoft.com/en-us/powershell/scripting/install/installing-powershell)
 
 ```powershell
-# Windows (winget)
+# Windows
 winget install Microsoft.PowerShell
 
-# macOS (Homebrew)
+# macOS
 brew install powershell/tap/powershell
 
 # Linux (Ubuntu/Debian)
 sudo apt-get install -y powershell
 ```
 
-See: https://learn.microsoft.com/en-us/powershell/scripting/install/installing-powershell
+## What's Included
 
-## Purpose
+| Component | Purpose |
+|-----------|---------|
+| `amplifier_module_tool_pwsh/` | Python tool module (`tool-pwsh`) |
+| `bundle.md` | Standalone bundle entry point |
+| `behaviors/windows-shell.yaml` | Composable behavior (tool + context) |
+| `context/windows-shell.md` | Always-injected Unix-to-PowerShell quick reference |
+| `skills/powershell-windows-dev/` | On-demand comprehensive PowerShell skill |
+| `tests/` | 53 tests (behavioral, structural, safety, execution) |
 
-Enables agents to execute PowerShell commands in a controlled environment. This is the **preferred shell tool on Windows** and works cross-platform where PowerShell Core is installed.
-
-**Platform Behavior:**
-- **Windows**: Uses `pwsh` (PowerShell Core) or falls back to `powershell` (Windows PowerShell)
-- **Linux/macOS**: Uses `pwsh` if installed (requires explicit installation)
-
-## Contract
-
-**Module Type:** Tool  
-**Mount Point:** `tools`  
-**Entry Point:** `amplifier_module_tool_pwsh:mount`
-
-## Tools Provided
+## Tool API
 
 ### `pwsh`
 
 Execute a PowerShell command.
 
-**Input:**
-
-- `command` (string): The PowerShell command to execute
-- `run_in_background` (boolean, optional): Run in background, return immediately with PID (default: false)
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `command` | string | Yes | — | PowerShell command to execute |
+| `timeout` | integer | No | 30 | Timeout in seconds. Increase for builds/tests. |
+| `run_in_background` | boolean | No | false | Fire-and-forget mode, returns PID immediately |
 
 **Output:**
+```json
+{
+  "stdout": "...",
+  "stderr": "...",
+  "returncode": 0
+}
+```
 
-- `stdout`: Standard output from command
-- `stderr`: Standard error from command  
-- `returncode`: Exit code (0 = success)
+Output is automatically truncated at ~100KB (40% head + 40% tail) with byte-level fallback for single-line output.
 
-**PowerShell Features:**
-- Pipelines: `Get-Process | Where-Object CPU -gt 100`
-- Cmdlets: `Get-ChildItem`, `Set-Location`, `Invoke-WebRequest`
-- Variables: `$env:PATH`, `$HOME`
-- Object-oriented output (converted to text)
-- Cross-platform paths: `Join-Path $HOME ".config"`
+## Safety System
+
+Four configurable profiles control what commands are allowed:
+
+| Profile | Blocks | Allowlist Override |
+|---------|--------|-------------------|
+| **strict** (default) | Disk ops, shutdown, recursive system deletes, privilege escalation, registry hive ops, execution policy changes, fork bombs, pipe-to-Invoke-Expression | No |
+| **standard** | Same as strict | Yes |
+| **permissive** | Root directory deletion, fork bombs only | Yes |
+| **unrestricted** | Nothing | Yes |
+
+Command-position detection is PowerShell-aware — `Get-Help Format-Volume` is allowed (Format-Volume is an argument), but `Format-Volume -DriveLetter C` is blocked (command position).
+
+Configure in your bundle:
+```yaml
+tools:
+  - module: tool-pwsh
+    source: git+https://github.com/colombod/amplifier-module-tool-pwsh@main
+    config:
+      safety_profile: standard      # strict | standard | permissive | unrestricted
+      timeout: 30
+      allowed_commands: []           # Allowlist patterns (wildcards supported)
+      denied_commands: []            # Extra blocklist patterns
+      safety_overrides:              # Fine-grained overrides
+        allow: []
+        block: []
+```
+
+## Platform Behavior
+
+| Platform | Shell | Fallback |
+|----------|-------|----------|
+| Windows | `pwsh` (PowerShell Core) | `powershell` (Windows PowerShell 5.1) |
+| Linux/macOS | `pwsh` (if installed) | Error with install instructions |
 
 ## Example Prompts
 
-Once configured, try these prompts with Amplifier:
-
-| Prompt | What It Does |
-|--------|--------------|
+| Prompt | What the agent runs |
+|--------|--------------------|
 | "List all running services" | `Get-Service \| Where-Object Status -eq Running` |
-| "Show system information" | `Get-ComputerInfo` |
 | "Find large files in Downloads" | `Get-ChildItem ~/Downloads -Recurse \| Sort-Object Length -Descending \| Select-Object -First 10` |
-| "Check disk space" | `Get-PSDrive -PSProvider FileSystem` |
-| "List installed programs" | `Get-Package` or `winget list` |
-| "Show network configuration" | `Get-NetIPConfiguration` |
+| "Show disk space" | `Get-PSDrive -PSProvider FileSystem` |
+| "Check network config" | `Get-NetIPConfiguration` |
+| "Install Python via winget" | `winget install Python.Python.3.12` |
 
-## Configuration
+## Related Bundles
 
-In your bundle or settings:
+These bundles build on `tool-pwsh` for Windows development:
 
-```yaml
-modules:
-  tools:
-    - id: tool-pwsh
-      config:
-        timeout: 30           # Command timeout in seconds
-        require_approval: false
-        allowed_commands: []  # Empty = all non-dangerous allowed
+| Bundle | Purpose | Install |
+|--------|---------|---------|
+| [winget-ops](https://github.com/colombod/amplifier-bundle-winget-ops) | Windows Package Manager agent | `amplifier bundle add git+https://github.com/colombod/amplifier-bundle-winget-ops@main --app` |
+| [dotnet-ops](https://github.com/colombod/amplifier-bundle-dotnet-ops) | Cross-platform .NET CLI agent | `amplifier bundle add git+https://github.com/colombod/amplifier-bundle-dotnet-ops@main --app` |
+
+## Development
+
+```bash
+# Clone and set up
+git clone https://github.com/colombod/amplifier-module-tool-pwsh.git
+cd amplifier-module-tool-pwsh
+uv venv && source .venv/bin/activate
+uv pip install -e .
+uv pip install pytest pytest-asyncio "amplifier-core @ git+https://github.com/microsoft/amplifier-core@main"
+
+# Run tests (requires pwsh installed)
+pytest tests/ -v
 ```
 
-## Security
+## License
 
-**IMPORTANT**: PowerShell execution can be dangerous. Use with caution:
-
-- Set `require_approval: true` for production
-- Use `allowed_commands` to whitelist safe commands
-- Run in isolated/containerized environments
-- Never execute untrusted user input
-
-**Blocked patterns include:**
-- `Remove-Item -Recurse -Force` on system paths
-- `Format-Volume`, `Clear-Disk`
-- `Stop-Computer`, `Restart-Computer`
-- Registry modifications to critical hives
-
-## Usage Example
-
-```python
-# Agent uses pwsh tool
-result = await session.call_tool("pwsh", {
-    "command": "Get-ChildItem -Path . -Recurse | Measure-Object"
-})
-```
-
-## Troubleshooting
-
-### "PowerShell not found"
-
-Install PowerShell Core:
-```powershell
-winget install Microsoft.PowerShell
-```
-
-### "Module not found" 
-
-Ensure the module source is configured:
-```powershell
-amplifier module source set tool-pwsh git+https://github.com/Anokye-Labs/amplifier-module-tool-pwsh --scope global
-```
-
-### Commands timing out
-
-Increase the timeout in your bundle config:
-```yaml
-modules:
-  tools:
-    - id: tool-pwsh
-      config:
-        timeout: 120  # 2 minutes
-```
-
-## Dependencies
-
-- `amplifier-core>=1.0.0`
-
-## Contributing
-
-> [!NOTE]
-> This project is not currently accepting external contributions, but we're actively working toward opening this up.
-
-This project has adopted the [Microsoft Open Source Code of Conduct](https://opensource.microsoft.com/codeofconduct/).
-
-## Trademarks
-
-This project may contain trademarks or logos for projects, products, or services. Authorized use of Microsoft trademarks or logos is subject to and must follow [Microsoft's Trademark & Brand Guidelines](https://www.microsoft.com/legal/intellectualproperty/trademarks/usage/general).
+MIT
