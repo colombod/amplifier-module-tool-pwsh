@@ -294,37 +294,32 @@ class SafetyValidator:
 
         Returns:
             SafetyResult indicating whether command is allowed
+
+        Priority order (deny rules checked before allowlist):
+            1. Unrestricted profile bypasses all checks
+            2. Custom denied_commands always block (highest deny priority)
+            3. Override blocks (safety_overrides.block) always block
+            4. Allowlist can override profile blocked patterns (if profile allows)
+            5. Profile blocked patterns checked with smart matching
+            6. Default: allow
         """
         # 1. Unrestricted profile = always allow
         if self.profile.name == "unrestricted":
             return SafetyResult(allowed=True)
 
-        # 2. Check allowlist (if profile allows overrides)
-        if self.profile.allow_overrides:
-            if self._matches_allowlist(command):
-                return SafetyResult(allowed=True)
-
-        # 3. Check blocked patterns with smart matching
-        for pattern in self.profile.blocked_patterns:
-            if self._check_pattern(command, pattern):
-                return SafetyResult(
-                    allowed=False,
-                    reason=pattern.reason,
-                    matched_pattern=pattern.pattern,
-                    hint="Use safety_profile: 'permissive' or 'unrestricted' for container/VM environments",
-                )
-
-        # 4. Check custom denied_commands (supports wildcards)
+        # 2. Check custom denied_commands first (supports wildcards)
+        # These always take precedence, even over the allowlist
         for denied in self.denied_commands:
             if self._matches_wildcard(command, denied):
                 return SafetyResult(
                     allowed=False,
                     reason=f"Matches custom denied pattern: {denied}",
                     matched_pattern=denied,
-                    hint="Remove from denied_commands or add to allowed_commands (if profile allows overrides)",
+                    hint="Remove from denied_commands to allow this command",
                 )
 
-        # 5. Check override blocks (from safety_overrides.block)
+        # 3. Check override blocks (from safety_overrides.block)
+        # These also take precedence over the allowlist
         for block_pattern in self._override_blocks:
             if self._matches_wildcard(command, block_pattern):
                 return SafetyResult(
@@ -332,6 +327,23 @@ class SafetyValidator:
                     reason=f"Blocked by safety_overrides: {block_pattern}",
                     matched_pattern=block_pattern,
                     hint="Remove from safety_overrides.block",
+                )
+
+        # 4. Check allowlist (if profile allows overrides)
+        # Only checked after deny rules, so denied_commands and override blocks
+        # cannot be bypassed by the allowlist
+        if self.profile.allow_overrides:
+            if self._matches_allowlist(command):
+                return SafetyResult(allowed=True)
+
+        # 5. Check blocked patterns with smart matching
+        for pattern in self.profile.blocked_patterns:
+            if self._check_pattern(command, pattern):
+                return SafetyResult(
+                    allowed=False,
+                    reason=pattern.reason,
+                    matched_pattern=pattern.pattern,
+                    hint="Use safety_profile: 'permissive' or 'unrestricted' for container/VM environments",
                 )
 
         # 6. Default: allow
@@ -411,8 +423,8 @@ class SafetyValidator:
                 i += 1
                 # Find the closing quote, handling escapes
                 while i < len(command):
-                    if command[i] == "\\" and i + 1 < len(command):
-                        # Skip escaped character
+                    if command[i] == "`" and i + 1 < len(command):
+                        # Skip backtick-escaped character (PowerShell escape)
                         i += 2
                         continue
                     if command[i] == quote_char:
@@ -443,7 +455,9 @@ class SafetyValidator:
         A command position is:
         - Start of the string
         - After PowerShell operators: ; | && || ( $( @( {
+        - After a newline (newlines are statement separators in PowerShell)
         - Not inside a quoted string
+        - Not on a backtick line continuation
 
         Args:
             command: The full command string
@@ -467,11 +481,28 @@ class SafetyValidator:
         if not before:
             return True
 
+        # Check if the previous non-whitespace line ends with backtick
+        # (PowerShell line continuation) — this means the current line is
+        # a continuation of the previous command, NOT a new command position
+        if before.endswith("`"):
+            return False
+
         # Check what the command portion ends with.
         # PowerShell command starters: ; | && || ( $( @( {
         command_starters = [";", "|", "&&", "||", "(", "$(", "@(", "{"]
         for starter in command_starters:
             if before.endswith(starter):
+                return True
+
+        # Check if position is at the start of a new line (newlines are
+        # statement separators in PowerShell, like semicolons)
+        before_with_space = command[:idx]
+        # Find the last newline before idx
+        last_newline = before_with_space.rfind("\n")
+        if last_newline != -1:
+            # Check if everything between the newline and idx is whitespace
+            between = before_with_space[last_newline + 1 : idx]
+            if not between.strip():
                 return True
 
         return False
@@ -567,7 +598,7 @@ class SafetyValidator:
         """
         try:
             # Use search, not match, to find pattern anywhere
-            return bool(re.search(pattern, command))
+            return bool(re.search(pattern, command, re.IGNORECASE))
         except re.error:
             # Invalid regex, treat as no match
             return False
