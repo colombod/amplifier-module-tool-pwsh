@@ -294,6 +294,14 @@ class SafetyValidator:
 
         Returns:
             SafetyResult indicating whether command is allowed
+
+        Priority order (deny rules checked before allowlist):
+            1. Unrestricted profile bypasses all checks
+            2. Custom denied_commands always block (highest deny priority)
+            3. Override blocks (safety_overrides.block) always block
+            4. Allowlist can override profile blocked patterns (if profile allows)
+            5. Profile blocked patterns checked with smart matching
+            6. Default: allow
         """
         # 1. Unrestricted profile = always allow
         if self.profile.name == "unrestricted":
@@ -330,7 +338,7 @@ class SafetyValidator:
                     allowed=False,
                     reason=f"Matches custom denied pattern: {denied}",
                     matched_pattern=denied,
-                    hint="Remove from denied_commands or add to allowed_commands (if profile allows overrides)",
+                    hint="Remove from denied_commands to allow this command",
                 )
 
         # 4. Check override blocks (from safety_overrides.block).
@@ -460,7 +468,9 @@ class SafetyValidator:
         A command position is:
         - Start of the string
         - After PowerShell operators: ; | && || ( $( @( {
+        - After a newline (newlines are statement separators in PowerShell)
         - Not inside a quoted string
+        - Not on a backtick line continuation
 
         Args:
             command: The full command string
@@ -485,12 +495,29 @@ class SafetyValidator:
         if not before:
             return True
 
+        # Check if the previous non-whitespace line ends with backtick
+        # (PowerShell line continuation) — this means the current line is
+        # a continuation of the previous command, NOT a new command position
+        if before.endswith("`"):
+            return False
+
         # Check what the command portion ends with.
         # PowerShell command starters: ; | && || ( $( @( { ` (backtick
         # continuation) and \n (newline as statement separator).
         command_starters = [";", "|", "&&", "||", "(", "$(", "@(", "{", "`", "\n"]
         for starter in command_starters:
             if before.endswith(starter):
+                return True
+
+        # Check if position is at the start of a new line (newlines are
+        # statement separators in PowerShell, like semicolons)
+        before_with_space = command[:idx]
+        # Find the last newline before idx
+        last_newline = before_with_space.rfind("\n")
+        if last_newline != -1:
+            # Check if everything between the newline and idx is whitespace
+            between = before_with_space[last_newline + 1 : idx]
+            if not between.strip():
                 return True
 
         return False

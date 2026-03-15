@@ -532,8 +532,24 @@ class PwshTool:
                     # Fall back to killing just the main process
                     process.kill()
             else:
-                # Windows or no pgid: kill just the main process
-                process.kill()
+                # Windows: use taskkill /T to kill the entire process tree
+                if sys.platform == "win32" and process.pid is not None:
+                    try:
+                        # /T = kill child processes, /F = force, /PID = target
+                        await asyncio.create_subprocess_exec(
+                            "taskkill",
+                            "/F",
+                            "/T",
+                            "/PID",
+                            str(process.pid),
+                            stdout=asyncio.subprocess.DEVNULL,
+                            stderr=asyncio.subprocess.DEVNULL,
+                        )
+                    except OSError:
+                        # taskkill not available, fall back to process.kill()
+                        process.kill()
+                else:
+                    process.kill()
 
             # Clean up
             try:
